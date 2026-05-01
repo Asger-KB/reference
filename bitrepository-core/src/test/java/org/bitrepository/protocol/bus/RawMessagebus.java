@@ -26,6 +26,7 @@ import org.apache.activemq.ActiveMQConnectionFactory;
 import org.bitrepository.common.JaxbHelper;
 import org.bitrepository.protocol.CoordinationLayerException;
 import org.bitrepository.protocol.activemq.ActiveMQMessageBus;
+import org.bitrepository.protocol.messagebus.MessageBus;
 import org.bitrepository.protocol.security.SecurityManager;
 import org.bitrepository.settings.repositorysettings.MessageBusConfiguration;
 import org.slf4j.Logger;
@@ -43,7 +44,7 @@ import javax.xml.bind.JAXBException;
 import java.util.HashMap;
 import java.util.Map;
 
-public class RawMessagebus {
+public class RawMessagebus implements AutoCloseable {
     private final Logger log = LoggerFactory.getLogger(getClass());
     private final Map<String, Destination> destinations = new HashMap<>();
     private final Map<String, MessageConsumer> consumers = new HashMap<>();
@@ -69,6 +70,11 @@ public class RawMessagebus {
             throw new CoordinationLayerException("Unable to initialise connection to message bus", e);
         }
     }
+        @Override
+    public void close() throws Exception {
+        connection.setExceptionListener(null);
+        connection.close();
+    }
 
     public void addHeader(Message msg,
                           String messageClass,
@@ -81,7 +87,7 @@ public class RawMessagebus {
         msg.setJMSCorrelationID(correlationID);
         msg.setJMSReplyTo(getDestination(replyTo, producerSession));
     }
-
+    
     public Message createMessage(org.bitrepository.bitrepositorymessages.Message message) throws JMSException {
         JaxbHelper jaxbHelper = new JaxbHelper("xsd/", "BitRepositoryMessages.xsd");
         String xmlContent;
@@ -157,7 +163,9 @@ public class RawMessagebus {
         }
         return consumers.get(key);
     }
+    
 
+    
     private class MessageBusExceptionListener implements ExceptionListener {
         @Override
         public void onException(JMSException arg0) {

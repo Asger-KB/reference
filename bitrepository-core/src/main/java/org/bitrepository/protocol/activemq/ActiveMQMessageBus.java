@@ -81,7 +81,7 @@ import java.util.concurrent.ThreadFactory;
  */
 public class ActiveMQMessageBus implements MessageBus {
     private final Logger log = LoggerFactory.getLogger(getClass());
-
+    
     /**
      * The key for storing the message type in a string property in the message headers.
      */
@@ -99,32 +99,32 @@ public class ActiveMQMessageBus implements MessageBus {
      * Default transacted.
      */
     public static final boolean TRANSACTED = false;
-
+    
     /**
      * The variable to separate the parts of the consumer key.
      */
     private static final String CONSUMER_KEY_SEPARATOR = "#";
-
+    
     /**
      * The session for sending messages. Should not be the same as the consumer session,
      * as sessions are not thread safe. This also means the session should be used in a synchronized manor.
      * TODO Switch to use a session pool/producer poll to allow multithreaded message sending, see
-     *  https://sbforge.org/jira/browse/BITMAG-357.
+     * https://sbforge.org/jira/browse/BITMAG-357.
      */
     private final Session producerSession;
-
+    
     /**
      * The session for receiving messages.
      */
     private final Session consumerSession;
     private final String clientID;
-
+    
     /**
      * Map of the consumers, mapping from a hash of "destinations and listener" to consumer.
      * Used to identify if a listener is already registered.
      */
     private final Map<String, MessageConsumer> consumers = Collections
-            .synchronizedMap(new HashMap<>());
+        .synchronizedMap(new HashMap<>());
     /**
      * Map of destinations, mapping from ID to destination.
      */
@@ -136,10 +136,10 @@ public class ActiveMQMessageBus implements MessageBus {
     private final JaxbHelper jaxbHelper;
     private final Connection connection;
     private final SecurityManager securityManager;
-
+    
     private final Set<String> componentFilter = new HashSet<>();
     private final Set<String> collectionFilter = new HashSet<>();
-
+    
     /**
      * The single producer used to send all messages. The destination need to be sent on the messages.
      */
@@ -148,14 +148,15 @@ public class ActiveMQMessageBus implements MessageBus {
      * Takes care of handling the further processing by the listeners in separated thread.
      */
     private final ReceivedMessageHandler receivedMessageHandler;
-
+    
     /**
      * ThreadFactory for any threads the activeMQ messageBus needs to create
      */
-    private static final ThreadFactory threadFactory = new DefaultThreadFactory(ActiveMQMessageListener.class.getSimpleName() + "-",
-            Thread.NORM_PRIORITY, false);
-
-
+    private static final ThreadFactory threadFactory = new DefaultThreadFactory(ActiveMQMessageListener.class.getSimpleName() +
+                                                                                "-",
+                                                                                Thread.NORM_PRIORITY, false);
+    
+    
     /**
      * Use the {@link org.bitrepository.protocol.ProtocolComponentFactory} to get a handle on a instance of
      * MessageBusConnections. This constructor is for the
@@ -177,25 +178,25 @@ public class ActiveMQMessageBus implements MessageBus {
             connection = connectionFactory.createConnection();
             connection.setClientID(clientID);
             connection.setExceptionListener(new MessageBusExceptionListener());
-
+            
             producerSession = connection.createSession(TRANSACTED, Session.AUTO_ACKNOWLEDGE);
             consumerSession = connection.createSession(TRANSACTED, Session.AUTO_ACKNOWLEDGE);
             producer = producerSession.createProducer(null);
             producer.setDeliveryMode(DeliveryMode.NON_PERSISTENT);
-
+            
             startListeningForMessages();
         } catch (JMSException e) {
             throw new CoordinationLayerException("Unable to initialise connection to message bus", e);
         }
         log.debug("ActiveMQConnection initialized for '{}'", configuration);
-
+        
         MessageThreadPools messageThreadPoolConfig = null;
         if (settings.getReferenceSettings().getGeneralSettings() != null) {
             messageThreadPoolConfig = settings.getReferenceSettings().getGeneralSettings().getMessageThreadPools();
         }
         receivedMessageHandler = new ReceivedMessageHandler(messageThreadPoolConfig);
     }
-
+    
     /**
      * Start to listen for message on the message bus. This is done in a separate thread to avoid blocking,
      * so the main thread can continue without having to wait for the messageBus listening to start.
@@ -210,29 +211,29 @@ public class ActiveMQMessageBus implements MessageBus {
         });
         connectionStarter.start();
     }
-
+    
     @Override
     public synchronized void addListener(String destinationID, final MessageListener listener) {
         addListener(destinationID, listener, false);
     }
-
+    
     @Override
     public synchronized void addListener(String destinationID, final MessageListener listener, boolean durable) {
         log.debug("Adding {} listener '{}' to destination: '{}' on message-bus '{}'.", (durable ? "durable " : ""),
-                listener, destinationID, configuration.getName());
+                  listener, destinationID, configuration.getName());
         MessageConsumer consumer = getMessageConsumer(destinationID, listener, durable);
         try {
             consumer.setMessageListener(new ActiveMQMessageListener(listener));
         } catch (JMSException e) {
             throw new CoordinationLayerException(
-                    "Unable to add durable listener '" + listener + "' to destinationID '" + destinationID + "'", e);
+                "Unable to add durable listener '" + listener + "' to destinationID '" + destinationID + "'", e);
         }
     }
-
+    
     @Override
     public synchronized void removeListener(String destinationID, MessageListener listener) {
         log.debug("Removing listener '{}' from destination: '{}' on message-bus '{}'",
-                listener, destinationID, configuration);
+                  listener, destinationID, configuration);
         MessageConsumer consumer = getMessageConsumer(destinationID, listener, false);
         try {
             // We need to set the listener to null to have the removeListener take effect at once.
@@ -241,30 +242,47 @@ public class ActiveMQMessageBus implements MessageBus {
             consumer.close();
         } catch (JMSException e) {
             throw new CoordinationLayerException(
-                    "Unable to remove listener '" + listener + "' from destinationID '" + destinationID + "'", e);
+                "Unable to remove listener '" + listener + "' from destinationID '" + destinationID + "'", e);
         }
         consumers.remove(getConsumerHash(destinationID, listener));
     }
-
+    
     @Override
     public void close() throws JMSException {
-        receivedMessageHandler.close();
         log.info("Closing message bus: {}", configuration);
-        producerSession.close();
-        log.debug("Producer session closed.");
-        consumerSession.close();
-        log.debug("Consumer session closed.");
-        connection.close();
-        log.debug("Connection closed.");
+        try {
+            receivedMessageHandler.close();
+        } catch (Exception e) {
+            log.warn("Exception while closing ActiveMQMessageBus receivedMessageHandler", e);
+        }
+        try {
+            producerSession.close();
+            log.debug("Producer session closed.");
+        } catch (JMSException e) {
+            log.warn("Exception while closing ActiveMQMessageBus ProducerSession", e);
+        }
+        try {
+            consumerSession.close();
+            log.debug("Consumer session closed.");
+        } catch (JMSException e) {
+            log.warn("Exception while closing ActiveMQMessageBus ConsumerSession", e);
+        }
+        try {
+            connection.close();
+            log.debug("Connection closed.");
+        } catch (JMSException e) {
+            log.warn("Exception while closing ActiveMQMessageBus Connection", e);
+        }
+        
     }
-
+    
     @Override
     public void sendMessage(Message content) {
         sendMessage(content.getDestination(), content.getReplyTo(), content.getTo(), content.getCollectionID(),
-                content.getCorrelationID(), content);
+                    content.getCorrelationID(), content);
         MessageLoggerProvider.getInstance().logMessageSent(content);
     }
-
+    
     /**
      * Send a message using ActiveMQ.
      * <p/>
@@ -288,8 +306,8 @@ public class ActiveMQMessageBus implements MessageBus {
             xmlContent = jaxbHelper.serializeToXml(content);
             jaxbHelper.validate(new ByteArrayInputStream(xmlContent.getBytes(StandardCharsets.UTF_8)));
             log.trace("The following message is sent to the destination '{}' on message-bus '{}': \n{}",
-                    destinationID, configuration.getName(), xmlContent);
-
+                      destinationID, configuration.getName(), xmlContent);
+            
             TextMessage msg = producerSession.createTextMessage(xmlContent);
             String stringData = msg.getText();
             String messageSignature = securityManager.signMessage(stringData);
@@ -301,7 +319,7 @@ public class ActiveMQMessageBus implements MessageBus {
             msg.setStringProperty(COLLECTION_ID_KEY, collectionID);
             msg.setJMSCorrelationID(correlationID);
             msg.setJMSReplyTo(getDestination(replyTo, producerSession));
-
+            
             producer.send(getDestination(destinationID, producerSession), msg);
         } catch (SAXException e) {
             throw new CoordinationLayerException("Rejecting to send invalid message: " + xmlContent, e);
@@ -309,7 +327,7 @@ public class ActiveMQMessageBus implements MessageBus {
             throw new CoordinationLayerException("Could not send message", e);
         }
     }
-
+    
     /**
      * Retrieves a consumer for the specific destination id and message listener.
      * If no such consumer already exists, then it is created.
@@ -323,7 +341,7 @@ public class ActiveMQMessageBus implements MessageBus {
     private MessageConsumer getMessageConsumer(String destinationID, MessageListener listener, boolean durable) {
         String key = getConsumerHash(destinationID, listener);
         log.debug("Retrieving message consumer on destination '{}' for listener '{}'. Key: '{}'",
-                destinationID, listener, key);
+                  destinationID, listener, key);
         if (!consumers.containsKey(key)) {
             log.debug("No consumer known. Creating new for key '{}", key);
             Destination destination = getDestination(destinationID, consumerSession);
@@ -335,19 +353,21 @@ public class ActiveMQMessageBus implements MessageBus {
                         consumer = consumerSession.createDurableSubscriber(topic, clientID);
                     } else {
                         throw new IllegalArgumentException("Can not create durable subscriber on " + destinationID +
-                                " is is not a topic");
+                                                           " is is not a topic");
                     }
                 } else {
                     consumer = consumerSession.createConsumer(destination);
                 }
             } catch (JMSException e) {
-                throw new CoordinationLayerException("Could not create message consumer for destination '" + destination + '"', e);
+                throw new CoordinationLayerException("Could not create message consumer for destination '" +
+                                                     destination +
+                                                     '"', e);
             }
             consumers.put(key, consumer);
         }
         return consumers.get(key);
     }
-
+    
     /**
      * Creates a unique hash of the message listener and the destination id.
      *
@@ -358,7 +378,7 @@ public class ActiveMQMessageBus implements MessageBus {
     private String getConsumerHash(String destinationID, MessageListener listener) {
         return destinationID + CONSUMER_KEY_SEPARATOR + listener.hashCode();
     }
-
+    
     /**
      * Given a destination ID, retrieve the destination object.
      *
@@ -370,7 +390,7 @@ public class ActiveMQMessageBus implements MessageBus {
         Destination destination = destinations.get(destinationID);
         if (destination == null) {
             try {
-
+                
                 String[] parts = destinationID.split("://");
                 if (parts.length == 1) {
                     destination = session.createTopic(destinationID);
@@ -390,7 +410,7 @@ public class ActiveMQMessageBus implements MessageBus {
                             break;
                         default:
                             throw new CoordinationLayerException("Unable to create destination '" +
-                                    destination + "'. Unknown type.");
+                                                                 destination + "'. Unknown type.");
                     }
                 }
             } catch (JMSException e) {
@@ -400,7 +420,7 @@ public class ActiveMQMessageBus implements MessageBus {
         }
         return destination;
     }
-
+    
     /**
      * Class for handling the message bus exceptions.
      */
@@ -410,7 +430,7 @@ public class ActiveMQMessageBus implements MessageBus {
             log.error("JMSException caught: ", arg0);
         }
     }
-
+    
     /**
      * Adapter from Active MQ message listener to message listener.
      * <p>
@@ -421,12 +441,12 @@ public class ActiveMQMessageBus implements MessageBus {
          * The Log.
          */
         private final Logger log = LoggerFactory.getLogger(getClass());
-
+        
         /**
          * The message listener that receives the messages.
          */
         private final MessageListener messageListener;
-
+        
         /**
          * Initialise the adapter from ActiveMQ message listener .
          *
@@ -435,7 +455,7 @@ public class ActiveMQMessageBus implements MessageBus {
         public ActiveMQMessageListener(MessageListener listener) {
             this.messageListener = listener;
         }
-
+        
         /**
          * When receiving the message, call the appropriate method on the message listener.
          * <p>
@@ -471,18 +491,18 @@ public class ActiveMQMessageBus implements MessageBus {
                 log.trace("Received xml message: '{}'", text);
                 jaxbHelper.validate(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)));
                 Message content = (Message) jaxbHelper.loadXml(
-                        Class.forName("org.bitrepository.bitrepositorymessages." + type),
-                        new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)));
+                    Class.forName("org.bitrepository.bitrepositorymessages." + type),
+                    new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)));
                 log.trace("Checking signature '{}'", signature);
                 SignerId signer = securityManager.authenticateMessage(text, signature);
                 securityManager.authorizeCertificateUse(content.getFrom(), text, signature);
                 if (content instanceof MessageRequest) {
                     securityManager.authorizeOperation(content.getClass().getSimpleName(), text, signature,
-                            content.getCollectionID());
+                                                       content.getCollectionID());
                 }
                 MessageVersionValidator.validateMessageVersion(content);
                 MessageLoggerProvider.getInstance().logMessageReceived(content);
-
+                
                 String certificateFingerprint = null;
                 if (signer != null) {
                     certificateFingerprint = securityManager.getCertificateFingerprint(signer);
@@ -496,7 +516,7 @@ public class ActiveMQMessageBus implements MessageBus {
             }
         }
     }
-
+    
     // This should be done on a per-module basis, but how?
     private void registerCustomMessageLoggers() {
         MessageLoggerProvider loggerProvider = MessageLoggerProvider.getInstance();
@@ -510,14 +530,14 @@ public class ActiveMQMessageBus implements MessageBus {
         loggerProvider.registerLogger(OperationType.GET_STATUS, new GetStatusMessageLogger());
         loggerProvider.registerLogger(List.of("AlarmMessage"), new AlarmMessageLogger());
     }
-
+    
     @Override
     public void setComponentFilter(List<String> componentIDs) {
         log.info("Settings component filter to: {}", componentIDs);
         componentFilter.clear();
         componentFilter.addAll(componentIDs);
     }
-
+    
     @Override
     public void setCollectionFilter(List<String> collectionIDs) {
         log.info("Settings collection filter to: {}", collectionIDs);
