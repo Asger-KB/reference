@@ -28,21 +28,26 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.core.util.StatusPrinter;
 import org.bitrepository.SuiteInfoParameterResolver;
 import org.bitrepository.bitrepositorymessages.AlarmMessage;
+import org.bitrepository.bitrepositorymessages.IdentifyPillarsForGetFileRequest;
+import org.bitrepository.bitrepositorymessages.Message;
 import org.bitrepository.common.settings.Settings;
 import org.bitrepository.common.settings.TestSettingsProvider;
 import org.bitrepository.common.utils.SettingsUtils;
 import org.bitrepository.common.utils.TestFileHelper;
+import org.bitrepository.protocol.MessageContext;
 import org.bitrepository.protocol.MessageReceiverManager;
 import org.bitrepository.protocol.fileexchange.HttpServerConfiguration;
 import org.bitrepository.protocol.http.EmbeddedHttpServer;
 import org.bitrepository.protocol.message.ExampleMessageFactory;
 import org.bitrepository.protocol.messagebus.MessageBus;
 import org.bitrepository.protocol.messagebus.MessageBusManager;
+import org.bitrepository.protocol.messagebus.MessageListener;
 import org.bitrepository.protocol.messagebus.SimpleMessageBus;
 import org.bitrepository.protocol.security.DummySecurityManager;
 import org.bitrepository.protocol.security.SecurityManager;
 import org.bitrepository.protocol.utils.TestWatcherExtension;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -55,6 +60,9 @@ import javax.jms.JMSException;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.bitrepository.common.utils.AllureTestUtils.addDescription;
 import static org.bitrepository.common.utils.AllureTestUtils.addStep;
@@ -64,6 +72,12 @@ import static org.bitrepository.common.utils.AllureTestUtils.addStep;
  */
 @ExtendWith(SuiteInfoParameterResolver.class)
 abstract class GeneralMessageBusTest {
+    /**
+     * The time to wait when sending a message before it definitely should
+     * have been consumed by a listener.
+     */
+    static final int TIME_FOR_WAIT = 2500;
+    private final static int threadCount = 3;
     public static LocalActiveMQBroker broker;
     public static EmbeddedHttpServer server;
     public static HttpServerConfiguration httpServerConfiguration;
@@ -85,9 +99,16 @@ abstract class GeneralMessageBusTest {
     protected String defaultAuditInformation;
     protected String testMethodName;
     
+    private int count = 0;
+    private final static String FINISH = "FINISH";
+    private final BlockingQueue<String> finishQueue = new LinkedBlockingQueue<>(1);
+    MultiMessageListener listener;
+    
+    private MessageReceiverManager receiverManager;
+    
     @RegisterExtension
     TestWatcherExtension testWatcher = new TestWatcherExtension();
-    private MessageReceiverManager receiverManager;
+    
     
     @BeforeEach
     public void initializeSuite(TestInfo testInfo) {
@@ -202,6 +223,24 @@ abstract class GeneralMessageBusTest {
     final void messageBusReconnectTest() {
         addDescription("Test whether we are able to reconnect to the message " +
                        "bus if the connection is lost");
+    }
+    
+      @Test
+    @Tag("regressiontest")
+    final void manyThreadsBeforeFinish() throws Exception {
+        addDescription("Tests whether it is possible to start the handling of many threads simultaneously.");
+        var idenfityRequest = ExampleMessageFactory.createMessage(IdentifyPillarsForGetFileRequest.class);
+        listener = new MultiMessageListener();
+        messageBus.addListener("BusActivityTest", listener);
+        idenfityRequest.setDestination("BusActivityTest");
+        
+        addStep("Send one message for each listener",
+                "When all have receiver, then they give respond on 'finishQueue'");
+        for (int i = 0; i < threadCount; i++) {
+            messageBus.sendMessage(idenfityRequest);
+        }
+        Assertions.assertEquals(FINISH, finishQueue.poll(TIME_FOR_WAIT, TimeUnit.MILLISECONDS));
+        Assertions.assertEquals(threadCount, count);
     }
     
     
@@ -342,5 +381,29 @@ abstract class GeneralMessageBusTest {
     
     protected SecurityManager createSecurityManager() {
         return new DummySecurityManager();
+    }
+    
+    protected class MultiMessageListener implements MessageListener {
+        private final BlockingQueue<String> queue = new LinkedBlockingQueue<>(threadCount);
+        
+        @Override
+        public final void onMessage(Message message, MessageContext messageContext) {
+            try {
+                testIfFinished();
+                Assertions.assertNotNull(queue.poll(TIME_FOR_WAIT, TimeUnit.MILLISECONDS));
+            } catch (InterruptedException e) {
+                Assertions.fail("Should not throw an exception: ", e);
+            }
+        }
+        
+        private void testIfFinished() throws InterruptedException {
+            count++;
+            if (count >= threadCount) {
+                for (int i = 0; i < threadCount; i++) {
+                    queue.put("Count '" + i + "'");
+                }
+                finishQueue.put(FINISH);
+            }
+        }
     }
 }
