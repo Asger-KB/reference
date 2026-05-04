@@ -41,6 +41,8 @@ import org.bitrepository.pillar.store.filearchive.CollectionArchiveManager;
 import org.bitrepository.service.AlarmDispatcher;
 import org.bitrepository.service.audit.MockAuditManager;
 import org.bitrepository.service.contributor.ResponseDispatcher;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -73,9 +75,8 @@ public abstract class DefaultPillarTest extends DefaultFixturePillarTest {
         }
     }
 
-    @Override
+    @BeforeEach
     protected void initializeCUT() {
-        super.initializeCUT();
         collectionID = settingsForTestClient.getCollections().get(0).getID();
         File fileDir = new File(settingsForCUT.getReferenceSettings().getPillarSettings().getCollectionDirs().get(0).getFileDirs().get(0));
         if (fileDir.exists()) {
@@ -84,7 +85,7 @@ public abstract class DefaultPillarTest extends DefaultFixturePillarTest {
         createReferencePillar();
     }
 
-    @Override
+    @AfterEach
     protected void shutdownCUT() {
         shutdownMediator();
     }

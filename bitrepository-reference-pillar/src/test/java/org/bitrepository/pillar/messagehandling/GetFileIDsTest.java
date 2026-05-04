@@ -41,6 +41,7 @@ import org.bitrepository.pillar.MockedPillarTest;
 import org.bitrepository.pillar.messagefactories.GetFileIDsMessageFactory;
 import org.bitrepository.pillar.store.checksumdatabase.ExtractedFileIDsResultSet;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,7 +62,7 @@ import static org.mockito.ArgumentMatchers.eq;
 class GetFileIDsTest extends MockedPillarTest {
     private GetFileIDsMessageFactory msgFactory;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new GetFileIDsMessageFactory(collectionID, settingsForTestClient, getPillarID(),

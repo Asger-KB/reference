@@ -42,6 +42,7 @@ import org.bitrepository.pillar.messagefactories.GetChecksumsMessageFactory;
 import org.bitrepository.pillar.store.checksumdatabase.ChecksumEntry;
 import org.bitrepository.pillar.store.checksumdatabase.ExtractedChecksumResultSet;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -66,7 +67,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 class GetChecksumsTest extends MockedPillarTest {
     private GetChecksumsMessageFactory msgFactory;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new GetChecksumsMessageFactory(collectionID, settingsForTestClient, getPillarID(),

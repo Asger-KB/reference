@@ -1,85 +1,374 @@
 /*
  * #%L
  * Bitrepository Protocol
- * 
+ *
  * $Id: DefaultFixturePillarTest.java 452 2011-11-10 09:59:11Z mss $
  * $HeadURL: https://sbforge.org/svn/bitrepository/bitrepository-reference/trunk/bitrepository-reference-pillar/src/test/java/org/bitrepository/pillar/DefaultFixturePillarTest.java $
  * %%
  * Copyright (C) 2010 - 2011 The State and University Library, The Royal Library and The State Archives, Denmark
  * %%
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as 
- * published by the Free Software Foundation, either version 2.1 of the 
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation, either version 2.1 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Lesser Public License for more details.
- * 
- * You should have received a copy of the GNU General Lesser Public 
+ *
+ * You should have received a copy of the GNU General Lesser Public
  * License along with this program.  If not, see
  * <http://www.gnu.org/licenses/lgpl-2.1.html>.
  * #L%
  */
 package org.bitrepository.pillar;
 
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.core.util.StatusPrinter;
+import org.bitrepository.client.conversation.mediator.CollectionBasedConversationMediator;
+import org.bitrepository.client.conversation.mediator.ConversationMediator;
 import org.bitrepository.common.settings.Settings;
-import org.bitrepository.protocol.IntegrationTest;
+import org.bitrepository.common.settings.TestSettingsProvider;
+import org.bitrepository.common.utils.SettingsUtils;
+import org.bitrepository.common.utils.TestFileHelper;
+import org.bitrepository.protocol.MessageReceiverManager;
+import org.bitrepository.protocol.activemq.ActiveMQMessageBus;
+import org.bitrepository.protocol.bus.LocalActiveMQBroker;
 import org.bitrepository.protocol.bus.MessageReceiver;
+import org.bitrepository.protocol.fileexchange.HttpServerConfiguration;
+import org.bitrepository.protocol.http.EmbeddedHttpServer;
+import org.bitrepository.protocol.message.ClientTestMessageFactory;
+import org.bitrepository.protocol.messagebus.MessageBus;
+import org.bitrepository.protocol.messagebus.MessageBusManager;
+import org.bitrepository.protocol.security.DummySecurityManager;
+import org.bitrepository.protocol.security.SecurityManager;
+import org.bitrepository.protocol.utils.TestWatcherExtension;
 import org.bitrepository.settings.repositorysettings.Collection;
+import org.bitrepository.settings.repositorysettings.MessageBusConfiguration;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestInfo;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.slf4j.LoggerFactory;
+import org.testcontainers.activemq.ActiveMQContainer;
+import org.testcontainers.junit.jupiter.Container;
+
+import javax.jms.JMSException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.List;
 
 /**
- * Contains the generic parts for pillar tests integrating to the message bus. 
+ * Contains the generic parts for pillar tests integrating to the message bus.
  * Mostly copied from DefaultFixtureClientTest...
  */
-public abstract class DefaultFixturePillarTest extends IntegrationTest {
-    protected static String pillarDestinationId;
+public abstract class DefaultFixturePillarTest {
+    protected static final String DEFAULT_FILE_ID = ClientTestMessageFactory.FILE_ID_DEFAULT;
+    public static LocalActiveMQBroker broker;
+    public static EmbeddedHttpServer server;
+    public static HttpServerConfiguration httpServerConfiguration;
+    public static MessageBus messageBus;
+
+    protected static MessageReceiver collectionReceiver;
 
     protected String clientDestinationId;
     protected MessageReceiver clientReceiver;
+    protected String pillarDestinationId;
+
+
+    protected static String alarmDestinationID;
+    protected static MessageReceiver alarmReceiver;
+
+    protected static SecurityManager securityManager;
+
+    protected static Settings settingsForCUT;
+    protected static Settings settingsForTestClient;
+
+    protected ConversationMediator conversationMediator;
+    private static MessageReceiverManager receiverManager;
+
+    @Container
+    static ActiveMQContainer activemqContainer = new ActiveMQContainer("apache/activemq:5.17.7");
+
+    protected static String defaultDownloadFileAddress;
+    protected static String defaultUploadFileAddress;
+    protected static String collectionID;
+    protected static String defaultFileId;
+    protected String nonDefaultFileId;
+
+
+    protected String testMethodName;
+
+
+    @RegisterExtension
+    TestWatcherExtension testWatcher = new TestWatcherExtension();
+
+
+    @BeforeAll
+    public static void initializeSuite() {
+        settingsForTestClient = loadSettings("TestSuiteInitialiser");
+        makeUserSpecificSettings(settingsForTestClient, getTopicPostfix());
+        httpServerConfiguration = new HttpServerConfiguration(settingsForTestClient.getReferenceSettings()
+                                                                                   .getFileExchangeSettings());
+        collectionID = settingsForTestClient.getCollections().get(0).getID();
+
+        securityManager = createSecurityManager();
+        defaultFileId = "DefaultFile";
+        try {
+            URL defaultFileUrl = httpServerConfiguration.getURL(TestFileHelper.DEFAULT_FILE_ID);
+            defaultDownloadFileAddress = defaultFileUrl.toExternalForm();
+            defaultUploadFileAddress = defaultFileUrl.toExternalForm() + "-" + "DefaultFile";
+        } catch (MalformedURLException e) {
+            throw new RuntimeException("Never happens");
+        }
+
+        startMessageBus();
+    }
+
+    @AfterAll
+    static void tearDown() {
+        teardownMessageBus();
+        teardownHttpServer();
+    }
+
+
+    @BeforeEach
+    public void writeLogStatus() {
+        if (System.getProperty("enableLogStatus", "false").equals("true")) {
+            LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+            StatusPrinter.print(lc);
+        }
+    }
+
+    /**
+     * Initializes the settings. Will postfix the alarm and collection topics with '-${user.name}
+     */
+    @BeforeEach
+    protected void setupSettings(TestInfo testInfo) {
+        testMethodName = testInfo.getTestMethod().get().getName();
+
+        settingsForCUT = loadSettings(getComponentID());
+        makeUserSpecificSettings(settingsForCUT, getTopicPostfix());
+
+        SettingsUtils.initialize(settingsForCUT);
+
+        nonDefaultFileId = TestFileHelper.createUniquePrefix(testMethodName);
+
+        settingsForTestClient = loadSettings(testMethodName);
+        makeUserSpecificSettings(settingsForTestClient, getTopicPostfix());
+
+        alarmDestinationID = settingsForCUT.getRepositorySettings().getProtocolSettings().getAlarmDestination();
+        pillarDestinationId = settingsForCUT.getContributorDestinationID();
+        clientDestinationId = settingsForTestClient.getReceiverDestinationID();
+
+        messageBus.setCollectionFilter(List.of());
+        messageBus.setComponentFilter(List.of());
+        receiverManager = new MessageReceiverManager(messageBus);
+
+        alarmReceiver = addReceiver(new MessageReceiver(settingsForCUT.getAlarmDestination()));
+        collectionReceiver = addReceiver(new MessageReceiver(settingsForCUT.getCollectionDestination()));
+        clientReceiver = addReceiver(new MessageReceiver(clientDestinationId));
+
+        receiverManager.startListeners();
+
+        renewConversationMediator();
+    }
+
+
+    @AfterEach
+    public void shutdownConversationMediator() {
+        if (receiverManager != null) {
+            receiverManager.stopListeners();
+        }
+        if (testWatcher.isTestSuccessful()) {
+            afterMethodVerification();
+        }
+
+        if (conversationMediator != null) {
+            conversationMediator.shutdown();
+        }
+        conversationMediator = null;
+    }
+
+
+    @AfterEach
+    public final void afterMethod() {
+        if (receiverManager != null) {
+            receiverManager.stopListeners();
+        }
+        if (testWatcher.isTestSuccessful()) {
+            afterMethodVerification();
+        }
+    }
+
+    /**
+     * Indicated whether an embedded http server should be started and used
+     */
+    public static boolean useEmbeddedHttpServer() {
+        return System.getProperty("useEmbeddedHttpServer", "false").equals("true");
+    }
 
     /**
      * Replaces the pillarID references in the settings will test specific pillarIDs.
      */
-    @Override
-    protected Settings loadSettings(String componentID) {
-        Settings settings = super.loadSettings(componentID);
+    protected static Settings loadSettings(String componentID) {
+        Settings settings = TestSettingsProvider.reloadSettings(componentID);
         updateSettingsWithSpecificPillarID(settings, componentID);
         return settings;
     }
 
-    @Override
-    protected void registerMessageReceivers() {
-        super.registerMessageReceivers();
 
-        clientDestinationId = settingsForTestClient.getReceiverDestinationID();
-        clientReceiver = new MessageReceiver(clientDestinationId);
-        addReceiver(clientReceiver);
+    /**
+     * Hooks up the message bus.
+     */
+    protected static void startMessageBus() {
+        activemqContainer.start();
+        while (!activemqContainer.isRunning()) {
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
 
-        pillarDestinationId = settingsForCUT.getContributorDestinationID();
+        var messageBusConfig = new MessageBusConfiguration();
+        messageBusConfig.setURL(activemqContainer.getBrokerUrl());
+        messageBusConfig.setName(activemqContainer.getContainerName());
+        settingsForTestClient.getRepositorySettings()
+                             .getProtocolSettings()
+                             .setMessageBusConfiguration(messageBusConfig);
+
+
+        messageBus = new ActiveMQMessageBus(settingsForTestClient, securityManager);
+        MessageBusManager.clear();
+        MessageBusManager.injectCustomMessageBus(MessageBusManager.DEFAULT_MESSAGE_BUS, messageBus);
     }
+
+    /**
+     * Shutdown the message bus.
+     */
+    private static void teardownMessageBus() {
+        MessageBusManager.clear();
+        if (messageBus != null) {
+            try {
+                messageBus.setComponentFilter(List.of());
+                messageBus.setCollectionFilter(List.of());
+
+                messageBus.close();
+                messageBus = null;
+            } catch (JMSException e) {
+
+            }
+        }
+
+        if (broker != null) {
+            try {
+                broker.stop();
+                broker = null;
+            } catch (Exception e) {
+                // No reason to pollute the test output with this
+            }
+        }
+    }
+
 
     protected String getPillarID() {
         return getComponentID();
     }
 
-    /** The default pillar id in the settings to replace.*/
+    /**
+     * The default pillar id in the settings to replace.
+     */
     private static final String DEFAULT_PILLAR_ID_TO_REPLACE = "Pillar1";
 
     /**
-     * Sets the given id to be the pillar id, also in the collections. 
+     * Sets the given id to be the pillar id, also in the collections.
+     *
      * @param settings The settings.
      * @param pillarID The new pillar id.
      */
-    private void updateSettingsWithSpecificPillarID(Settings settings, String pillarID) {
+    private static void updateSettingsWithSpecificPillarID(Settings settings, String pillarID) {
         settings.getReferenceSettings().getPillarSettings().setPillarID(pillarID);
-        for(Collection collection : settings.getRepositorySettings().getCollections().getCollection()) {
-            if(collection.getPillarIDs().getPillarID().remove(DEFAULT_PILLAR_ID_TO_REPLACE)) {
+        for (Collection collection : settings.getRepositorySettings().getCollections().getCollection()) {
+            if (collection.getPillarIDs().getPillarID().remove(DEFAULT_PILLAR_ID_TO_REPLACE)) {
                 collection.getPillarIDs().getPillarID().add(pillarID);
             }
         }
     }
 
 
+    /**
+     * Used for creating a new conversationMediator between tests, and for tests needing to use a differently configured
+     * mediator.
+     */
+    protected void renewConversationMediator() {
+        if (conversationMediator != null) {
+            conversationMediator.shutdown();
+        }
+        conversationMediator = new CollectionBasedConversationMediator(settingsForCUT, securityManager);
+    }
+
+
+    protected static MessageReceiver addReceiver(MessageReceiver receiver) {
+        receiverManager.addReceiver(receiver);
+        return receiver;
+    }
+
+    /**
+     * May be used by specific tests for general verification when the test method has finished. Will only be run
+     * if the test has passed (so far).
+     */
+    protected void afterMethodVerification() {
+        receiverManager.checkNoMessagesRemainInReceivers();
+    }
+
+    /**
+     * Purges all messages from the receivers.
+     */
+    protected void clearReceivers() {
+        receiverManager.clearMessagesInReceivers();
+    }
+
+
+    private static void makeUserSpecificSettings(Settings settings, final String topicPostfix) {
+        settings.getRepositorySettings().getProtocolSettings()
+                .setCollectionDestination(settings.getCollectionDestination() + topicPostfix);
+        settings.getRepositorySettings().getProtocolSettings()
+                .setAlarmDestination(settings.getAlarmDestination() + topicPostfix);
+    }
+
+
+    /**
+     * Shutdown the embedded http server if any.
+     */
+    protected static void teardownHttpServer() {
+        if (useEmbeddedHttpServer()) {
+            server.stop();
+        }
+    }
+
+    /**
+     * Returns the postfix string to use when accessing user specific topics, which is the mechanism we use in the
+     * bit repository tests.
+     *
+     * @return The string to postfix all topix names with.
+     */
+    protected static String getTopicPostfix() {
+        return "-" + System.getProperty("user.name");
+    }
+
+    protected String getComponentID() {
+        return getClass().getSimpleName();
+    }
+
+    protected String createDate() {
+        return Long.toString(System.currentTimeMillis());
+    }
+
+    protected static SecurityManager createSecurityManager() {
+        return new DummySecurityManager();
+    }
 }

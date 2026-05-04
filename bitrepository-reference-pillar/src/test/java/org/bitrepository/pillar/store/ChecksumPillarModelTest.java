@@ -31,6 +31,7 @@ import org.bitrepository.pillar.store.checksumdatabase.ChecksumStore;
 import org.bitrepository.service.AlarmDispatcher;
 import org.bitrepository.settings.referencesettings.ChecksumPillarFileDownload;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,7 +52,7 @@ public class ChecksumPillarModelTest extends DefaultFixturePillarTest {
 
     protected static final String EMPTY_MD5_CHECKSUM = "d41d8cd98f00b204e9800998ecf8427e";
 
-    @Override
+    @BeforeEach
     protected void initializeCUT() {
         cache = new MemoryCacheMock();
         alarmDispatcher = new AlarmDispatcher(settingsForCUT, messageBus);

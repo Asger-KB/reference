@@ -35,6 +35,8 @@ import org.bitrepository.pillar.store.StorageModel;
 import org.bitrepository.protocol.FileExchange;
 import org.bitrepository.service.audit.MockAuditManager;
 import org.bitrepository.service.contributor.ResponseDispatcher;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 
 import static org.bitrepository.common.utils.AllureTestUtils.addFixture;
 import static org.mockito.Mockito.mock;
@@ -52,9 +54,7 @@ public abstract class MockedPillarTest extends DefaultFixturePillarTest {
     protected static String DEFAULT_MD5_CHECKSUM = "1234cccccccc4321";
     protected static String NON_DEFAULT_MD5_CHECKSUM = "1234cccccccc4322";
 
-    @Override
     protected void initializeCUT() {
-        super.initializeCUT();
         audits = new MockAuditManager();
         model = mock(StorageModel.class);
         fileExchangeMock = mock(FileExchange.class);
@@ -62,10 +62,9 @@ public abstract class MockedPillarTest extends DefaultFixturePillarTest {
         createPillar();
     }
 
-    @Override
+    @AfterEach
     protected void shutdownCUT() {
         shutdownMediator();
-        super.shutdownCUT();
     }
 
     /**

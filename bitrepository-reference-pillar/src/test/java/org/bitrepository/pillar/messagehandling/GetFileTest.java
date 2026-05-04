@@ -41,6 +41,7 @@ import org.bitrepository.service.exception.IdentifyContributorException;
 import org.bitrepository.service.exception.InvalidMessageException;
 import org.bitrepository.service.exception.RequestHandlerException;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,7 +63,7 @@ import static org.bitrepository.common.utils.AllureTestUtils.addStep;
 class GetFileTest extends MockedPillarTest {
     private GetFileMessageFactory msgFactory;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new GetFileMessageFactory(collectionID, settingsForTestClient, getPillarID(), pillarDestinationId);

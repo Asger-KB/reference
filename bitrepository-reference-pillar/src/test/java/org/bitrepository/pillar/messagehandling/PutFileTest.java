@@ -41,6 +41,7 @@ import org.bitrepository.common.utils.CalendarUtils;
 import org.bitrepository.pillar.MockedPillarTest;
 import org.bitrepository.pillar.messagefactories.PutFileMessageFactory;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,7 +61,7 @@ class PutFileTest extends MockedPillarTest {
     PutFileMessageFactory msgFactory;
     Long FILE_SIZE = 1L;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new PutFileMessageFactory(collectionID, settingsForTestClient, getPillarID(),

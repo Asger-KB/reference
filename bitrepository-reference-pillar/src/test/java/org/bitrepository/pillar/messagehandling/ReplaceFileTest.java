@@ -42,6 +42,7 @@ import org.bitrepository.common.utils.CalendarUtils;
 import org.bitrepository.pillar.MockedPillarTest;
 import org.bitrepository.pillar.messagefactories.ReplaceFileMessageFactory;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,7 +65,7 @@ class ReplaceFileTest extends MockedPillarTest {
     ReplaceFileMessageFactory msgFactory;
     Long FILE_SIZE = 1L;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new ReplaceFileMessageFactory(collectionID, settingsForTestClient, getPillarID(),

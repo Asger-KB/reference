@@ -37,6 +37,7 @@ import org.bitrepository.bitrepositorymessages.IdentifyPillarsForDeleteFileReque
 import org.bitrepository.bitrepositorymessages.IdentifyPillarsForDeleteFileResponse;
 import org.bitrepository.pillar.MockedPillarTest;
 import org.bitrepository.pillar.messagefactories.DeleteFileMessageFactory;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -59,7 +60,7 @@ import static org.mockito.ArgumentMatchers.eq;
 class DeleteFileTest extends MockedPillarTest {
     private DeleteFileMessageFactory msgFactory;
 
-    @Override
+    @BeforeEach
     public void initializeCUT() {
         super.initializeCUT();
         msgFactory = new DeleteFileMessageFactory(collectionID, settingsForTestClient, getPillarID(),

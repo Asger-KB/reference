@@ -51,6 +51,7 @@ class GeneralMessageHandlingTest extends MockedPillarTest {
 
     @BeforeEach
     void setup() {
+        super.initializeCUT();
         this.requestHandler = new MockRequestHandler(context, model);
     }
 
