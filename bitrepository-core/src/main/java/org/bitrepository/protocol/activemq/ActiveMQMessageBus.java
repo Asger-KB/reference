@@ -60,6 +60,7 @@ import javax.jms.Connection;
 import javax.jms.DeliveryMode;
 import javax.jms.Destination;
 import javax.jms.ExceptionListener;
+import javax.jms.IllegalStateException;
 import javax.jms.JMSException;
 import javax.jms.MessageConsumer;
 import javax.jms.MessageProducer;
@@ -237,9 +238,12 @@ public class ActiveMQMessageBus implements MessageBus {
         MessageConsumer consumer = getMessageConsumer(destinationID, listener, false);
         try {
             // We need to set the listener to null to have the removeListener take effect at once.
-            // If this isn't done the listener will continue to receive messages. Do we have a memory leak here? 
+            // If this isn't done the listener will continue to receive messages. Do we have a memory leak here?
             consumer.setMessageListener(null);
+
             consumer.close();
+        } catch (IllegalStateException isAlreadyClosed){
+            //ignored
         } catch (JMSException e) {
             throw new CoordinationLayerException(
                 "Unable to remove listener '" + listener + "' from destinationID '" + destinationID + "'", e);
@@ -278,8 +282,12 @@ public class ActiveMQMessageBus implements MessageBus {
     
     @Override
     public void sendMessage(Message content) {
-        sendMessage(content.getDestination(), content.getReplyTo(), content.getTo(), content.getCollectionID(),
-                    content.getCorrelationID(), content);
+        sendMessage(content.getDestination(),
+                    content.getReplyTo(),
+                    content.getTo(),
+                    content.getCollectionID(),
+                    content.getCorrelationID(),
+                    content);
         MessageLoggerProvider.getInstance().logMessageSent(content);
     }
     
