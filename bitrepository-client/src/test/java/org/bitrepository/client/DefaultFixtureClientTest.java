@@ -1,23 +1,23 @@
 /*
  * #%L
  * Bitrepository Protocol
- * 
+ *
  * $Id$
  * $HeadURL$
  * %%
  * Copyright (C) 2010 - 2011 The State and University Library, The Royal Library and The State Archives, Denmark
  * %%
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as 
- * published by the Free Software Foundation, either version 2.1 of the 
+ * it under the terms of the GNU Lesser General Public License as
+ * published by the Free Software Foundation, either version 2.1 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Lesser Public License for more details.
- * 
- * You should have received a copy of the GNU General Lesser Public 
+ *
+ * You should have received a copy of the GNU General Lesser Public
  * License along with this program.  If not, see
  * <http://www.gnu.org/licenses/lgpl-2.1.html>.
  * #L%
@@ -45,7 +45,9 @@ import org.bitrepository.protocol.security.DummySecurityManager;
 import org.bitrepository.protocol.security.SecurityManager;
 import org.bitrepository.protocol.utils.TestWatcherExtension;
 import org.bitrepository.settings.repositorysettings.MessageBusConfiguration;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -86,51 +88,70 @@ public abstract class DefaultFixtureClientTest {
     protected static Settings settingsForTestClient;
 
     protected ConversationMediator conversationMediator;
-    private MessageReceiverManager receiverManager;
-
-    private String testMethodName;
+    private static MessageReceiverManager receiverManager;
 
     @Container
-    ActiveMQContainer activemqContainer = new ActiveMQContainer("apache/activemq:5.17.7");
+    static ActiveMQContainer activemqContainer = new ActiveMQContainer("apache/activemq:5.17.7");
 
-    private MessageBusConfiguration messageBusConfig;
-    private String defaultFileId;
-    private URL defaultFileUrl;
-    protected String defaultDownloadFileAddress;
-    protected String defaultUploadFileAddress;
-    protected String collectionID;
+    protected static String defaultDownloadFileAddress;
+    protected static String defaultUploadFileAddress;
+    protected static String collectionID;
 
     @RegisterExtension
     TestWatcherExtension testWatcher = new TestWatcherExtension();
-    private String nonDefaultFileId;
-    private String defaultAuditInformation;
 
 
-    @BeforeEach
-    public void initializeSuite(TestInfo testInfo) {
-        settingsForCUT = loadSettings(getComponentID());
+    @BeforeAll
+    public static void initializeSuite() {
         settingsForTestClient = loadSettings("TestSuiteInitialiser");
-        makeUserSpecificSettings(settingsForCUT);
-        makeUserSpecificSettings(settingsForTestClient);
-        httpServerConfiguration =
-                new HttpServerConfiguration(settingsForTestClient.getReferenceSettings().getFileExchangeSettings());
+        makeUserSpecificSettings(settingsForTestClient, getTopicPostfix());
+        httpServerConfiguration = new HttpServerConfiguration(settingsForTestClient.getReferenceSettings()
+                                                                                   .getFileExchangeSettings());
         collectionID = settingsForTestClient.getCollections().get(0).getID();
 
         securityManager = createSecurityManager();
-        defaultFileId = "DefaultFile";
         try {
-            defaultFileUrl = httpServerConfiguration.getURL(TestFileHelper.DEFAULT_FILE_ID);
+            URL defaultFileUrl = httpServerConfiguration.getURL(TestFileHelper.DEFAULT_FILE_ID);
             defaultDownloadFileAddress = defaultFileUrl.toExternalForm();
-            defaultUploadFileAddress = defaultFileUrl.toExternalForm() + "-" + defaultFileId;
+            defaultUploadFileAddress = defaultFileUrl.toExternalForm() + "-" + "DefaultFile";
         } catch (MalformedURLException e) {
             throw new RuntimeException("Never happens");
         }
-        startMessageBus();
 
-        testMethodName = testInfo.getTestMethod().get().getName();
-        setupSettings();
-        nonDefaultFileId = TestFileHelper.createUniquePrefix(testMethodName);
-        defaultAuditInformation = testMethodName;
+        startMessageBus();
+    }
+
+    @AfterAll
+    static void tearDown() {
+        messageBus.setComponentFilter(List.of());
+        messageBus.setCollectionFilter(List.of());
+        teardownMessageBus();
+        teardownHttpServer();
+    }
+
+
+    @BeforeEach
+    public void writeLogStatus() {
+        if (System.getProperty("enableLogStatus", "false").equals("true")) {
+            LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+            StatusPrinter.print(lc);
+        }
+    }
+
+    /**
+     * Initializes the settings. Will postfix the alarm and collection topics with '-${user.name}
+     */
+    @BeforeEach
+    protected void setupSettings(TestInfo testInfo) {
+        settingsForCUT = loadSettings(getComponentID());
+        makeUserSpecificSettings(settingsForCUT, getTopicPostfix());
+
+        SettingsUtils.initialize(settingsForCUT);
+
+        alarmDestinationID = settingsForCUT.getRepositorySettings().getProtocolSettings().getAlarmDestination();
+
+        settingsForTestClient = loadSettings(testInfo.getTestMethod().get().getName());
+        makeUserSpecificSettings(settingsForTestClient, getTopicPostfix());
 
         messageBus.setCollectionFilter(List.of());
         messageBus.setComponentFilter(List.of());
@@ -149,50 +170,31 @@ public abstract class DefaultFixtureClientTest {
         receiverManager.startListeners();
 
 
-    }
-
-    @BeforeEach
-    protected void initializeCUT() {
         renewConversationMediator();
     }
 
 
-    @BeforeEach
-    public void writeLogStatus() {
-        if (System.getProperty("enableLogStatus", "false").equals("true")) {
-            LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
-            StatusPrinter.print(lc);
-        }
-    }
-
     @AfterEach
-    void tearDown() {
+    public void shutdownConversationMediator() {
         if (receiverManager != null) {
             receiverManager.stopListeners();
         }
         if (testWatcher.isTestSuccessful()) {
             afterMethodVerification();
         }
-        shutdownCUT();
-        messageBus.setComponentFilter(List.of());
-        messageBus.setCollectionFilter(List.of());
-        teardownMessageBus();
-        teardownHttpServer();
+
+        if (conversationMediator != null) {
+            conversationMediator.shutdown();
+        }
+        conversationMediator = null;
     }
 
 
     /**
      * Indicated whether an embedded http server should be started and used
      */
-    public boolean useEmbeddedHttpServer() {
+    public static boolean useEmbeddedHttpServer() {
         return System.getProperty("useEmbeddedHttpServer", "false").equals("true");
-    }
-
-
-    /**
-     * May be overridden by specific tests wishing to do stuff. Remember to call super if this is overridden.
-     */
-    protected void shutdownCUT() {
     }
 
 
@@ -207,15 +209,8 @@ public abstract class DefaultFixtureClientTest {
         conversationMediator = new CollectionBasedConversationMediator(settingsForCUT, securityManager);
     }
 
-    @AfterEach
-    public void shutdownConversationMediator() {
-        if (conversationMediator != null) {
-            conversationMediator.shutdown();
-        }
-        conversationMediator = null;
-    }
 
-    protected MessageReceiver addReceiver(MessageReceiver receiver) {
+    protected static MessageReceiver addReceiver(MessageReceiver receiver) {
         receiverManager.addReceiver(receiver);
         return receiver;
     }
@@ -236,37 +231,22 @@ public abstract class DefaultFixtureClientTest {
     }
 
 
-    /**
-     * Initializes the settings. Will postfix the alarm and collection topics with '-${user.name}
-     */
-    protected void setupSettings() {
-        settingsForCUT = loadSettings(getComponentID());
-        makeUserSpecificSettings(settingsForCUT);
-        SettingsUtils.initialize(settingsForCUT);
-
-        alarmDestinationID = settingsForCUT.getRepositorySettings().getProtocolSettings().getAlarmDestination();
-
-        settingsForTestClient = loadSettings(testMethodName);
-        makeUserSpecificSettings(settingsForTestClient);
-    }
-
-    protected Settings loadSettings(String componentID) {
+    protected static Settings loadSettings(String componentID) {
         return TestSettingsProvider.reloadSettings(componentID);
     }
 
-    private void makeUserSpecificSettings(Settings settings) {
+    private static void makeUserSpecificSettings(Settings settings, final String topicPostfix) {
         settings.getRepositorySettings().getProtocolSettings()
-                .setCollectionDestination(settings.getCollectionDestination() + getTopicPostfix());
+                .setCollectionDestination(settings.getCollectionDestination() + topicPostfix);
         settings.getRepositorySettings().getProtocolSettings()
-                .setAlarmDestination(settings.getAlarmDestination() + getTopicPostfix());
+                .setAlarmDestination(settings.getAlarmDestination() + topicPostfix);
     }
-
 
 
     /**
      * Hooks up the message bus.
      */
-    protected void startMessageBus() {
+    protected static void startMessageBus() {
         activemqContainer.start();
         while (!activemqContainer.isRunning()) {
             try {
@@ -276,7 +256,7 @@ public abstract class DefaultFixtureClientTest {
             }
         }
 
-        messageBusConfig = new MessageBusConfiguration();
+        var messageBusConfig = new MessageBusConfiguration();
         messageBusConfig.setURL(activemqContainer.getBrokerUrl());
         messageBusConfig.setName(activemqContainer.getContainerName());
         settingsForTestClient.getRepositorySettings()
@@ -292,7 +272,7 @@ public abstract class DefaultFixtureClientTest {
     /**
      * Shutdown the message bus.
      */
-    private void teardownMessageBus() {
+    private static void teardownMessageBus() {
         MessageBusManager.clear();
         if (messageBus != null) {
             try {
@@ -316,7 +296,7 @@ public abstract class DefaultFixtureClientTest {
     /**
      * Shutdown the embedded http server if any.
      */
-    protected void teardownHttpServer() {
+    protected static void teardownHttpServer() {
         if (useEmbeddedHttpServer()) {
             server.stop();
         }
@@ -328,7 +308,7 @@ public abstract class DefaultFixtureClientTest {
      *
      * @return The string to postfix all topix names with.
      */
-    protected String getTopicPostfix() {
+    protected static String getTopicPostfix() {
         return "-" + System.getProperty("user.name");
     }
 
@@ -340,7 +320,7 @@ public abstract class DefaultFixtureClientTest {
         return Long.toString(System.currentTimeMillis());
     }
 
-    protected SecurityManager createSecurityManager() {
+    protected static SecurityManager createSecurityManager() {
         return new DummySecurityManager();
     }
 
